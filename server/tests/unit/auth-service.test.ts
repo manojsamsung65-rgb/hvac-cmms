@@ -87,7 +87,7 @@ describe('auth service', () => {
     const first = await service.consumeRecovery(user, session, recoveryCodes[0]);
     expect(first.remaining).toBe(recoveryCodes.length - 1);
     await expect(service.consumeRecovery(user, session, recoveryCodes[0])).rejects.toMatchObject({
-      code: 'invalid_recovery_code',
+      code: 'invalid_mfa_code',
     });
   });
 });

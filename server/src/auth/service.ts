@@ -1,14 +1,15 @@
 import { HttpError } from '../middleware/errorHandler';
+import { getMfaEncryptionKey } from '../config/env';
 import { hashPassword, verifyPassword } from '../lib/password';
 import { generateSessionToken, hashSessionToken } from '../lib/session-token';
 import { generateCsrfToken } from '../lib/csrf';
-import { generateTotpSecret, totpKeyUri, verifyTotp } from '../lib/totp';
+import { decryptSecret, encryptSecret } from '../lib/secret-box';
+import { currentTotpStep, generateTotpSecret, totpKeyUri, verifyTotp } from '../lib/totp';
 import { consumeRecoveryCode, generateRecoveryCodes, hashRecoveryCode } from '../lib/recovery-codes';
-import { effectiveRole, type Role } from './policy';
+import type { Role } from './policy';
+import { SESSION_ABSOLUTE_TTL_MS, SESSION_IDLE_TTL_MS } from './session';
 import type { AuthRepositories, AuthUser, SessionRecord } from './types';
 
-const SESSION_IDLE_TTL_MS = 8 * 60 * 60 * 1000; // 8 hours
-const SESSION_ABSOLUTE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 const MFA_ISSUER = 'HVAC CMMS';
 
 // A dummy hash used to equalise timing when an account does not exist, so login
@@ -35,14 +36,14 @@ function invalidCredentials(): HttpError {
   return new HttpError(401, 'Invalid email or password', 'invalid_credentials');
 }
 
+// A single, generic failure for any MFA verification problem so that failed
+// attempts do not reveal whether a code, factor, or recovery token was valid.
+function invalidMfa(): HttpError {
+  return new HttpError(401, 'Invalid verification code', 'invalid_mfa_code');
+}
+
 export function createAuthService(deps: AuthServiceDeps) {
   const now = deps.now ?? (() => new Date());
-
-  async function rolesForUser(userId: string): Promise<Role[]> {
-    // Effective role is computed by the user repository; expose it via findById.
-    const user = await deps.users.findById(userId);
-    return user ? [user.role] : [];
-  }
 
   return {
     async login(
@@ -52,14 +53,12 @@ export function createAuthService(deps: AuthServiceDeps) {
     ): Promise<LoginResult> {
       const user = await deps.users.findByEmail(email.toLowerCase().trim());
       if (!user || !user.passwordHash) {
-        // Equalise timing for unknown accounts, then fail generically.
         await verifyPassword(DUMMY_HASH, password);
         throw invalidCredentials();
       }
       const ok = await verifyPassword(user.passwordHash, password);
-      if (!ok || !user.isActive) {
-        throw invalidCredentials();
-      }
+      if (!ok || !user.isActive) throw invalidCredentials();
+
       const at = now();
       const { token, tokenHash } = generateSessionToken();
       const session = await deps.sessions.create({
@@ -86,7 +85,6 @@ export function createAuthService(deps: AuthServiceDeps) {
     async contextForSession(session: SessionRecord): Promise<AuthenticatedContext> {
       const user = await deps.users.findById(session.userId);
       if (!user) throw new HttpError(401, 'Account is not active', 'unauthenticated');
-      await deps.sessions.touch(session.id, now());
       return {
         user: {
           id: user.id,
@@ -99,30 +97,50 @@ export function createAuthService(deps: AuthServiceDeps) {
     },
 
     async enrollMfa(user: AuthUser): Promise<{ secret: string; uri: string }> {
+      const key = getMfaEncryptionKey();
       const existing = await deps.mfa.getFactor(user.id, 'totp');
-      const secret = existing?.secret ?? generateTotpSecret();
-      if (!existing) {
+      let secret: string;
+      if (existing) {
+        secret = decryptSecret(existing.secret, key);
+      } else {
+        secret = generateTotpSecret();
         await deps.mfa.upsertFactor({
           organizationId: user.organizationId,
           userId: user.id,
           type: 'totp',
-          secret,
+          secret: encryptSecret(secret, key),
         });
       }
       return { secret, uri: totpKeyUri(`user:${user.id}`, MFA_ISSUER, secret) };
     },
 
-    async verifyMfa(user: AuthUser, session: SessionRecord, token: string): Promise<{ recoveryCodes: string[] }> {
+    async verifyMfa(
+      user: AuthUser,
+      session: SessionRecord,
+      token: string,
+    ): Promise<{ recoveryCodes: string[] }> {
+      const key = getMfaEncryptionKey();
       const factor = await deps.mfa.getFactor(user.id, 'totp');
-      if (!factor) throw new HttpError(400, 'MFA is not enrolled', 'mfa_not_enrolled');
-      if (!verifyTotp(factor.secret, token)) {
-        throw new HttpError(401, 'Invalid MFA code', 'invalid_mfa_code');
+      if (!factor) throw invalidMfa();
+
+      // Replay protection: reject a code from the current or any earlier step.
+      const step = currentTotpStep(now().getTime());
+      if (factor.lastTotpStep !== null && step <= factor.lastTotpStep) {
+        throw invalidMfa();
       }
+      let secret: string;
+      try {
+        secret = decryptSecret(factor.secret, key);
+      } catch {
+        throw invalidMfa();
+      }
+      if (!verifyTotp(secret, token)) throw invalidMfa();
+
       const at = now();
       await deps.mfa.markVerified(user.id, 'totp', at);
+      await deps.mfa.setLastTotpStep(user.id, 'totp', step);
       await deps.sessions.setMfaVerified(session.id, at);
 
-      // Issue recovery codes once, on first successful verification.
       const existing = await deps.recovery.listHashesForUser(user.id);
       let recoveryCodes: string[] = [];
       if (existing.length === 0) {
@@ -136,12 +154,15 @@ export function createAuthService(deps: AuthServiceDeps) {
       return { recoveryCodes };
     },
 
-    async consumeRecovery(user: AuthUser, session: SessionRecord, code: string): Promise<{ remaining: number }> {
+    async consumeRecovery(
+      user: AuthUser,
+      session: SessionRecord,
+      code: string,
+    ): Promise<{ remaining: number }> {
       const hashes = await deps.recovery.listHashesForUser(user.id);
       const result = consumeRecoveryCode(code, hashes);
-      if (!result.ok) {
-        throw new HttpError(401, 'Invalid recovery code', 'invalid_recovery_code');
-      }
+      if (!result.ok) throw invalidMfa();
+
       const consumedHash = hashes.find((h) => !result.remaining.includes(h));
       const at = now();
       if (consumedHash) await deps.recovery.markUsedByHash(consumedHash, at);
@@ -152,9 +173,6 @@ export function createAuthService(deps: AuthServiceDeps) {
     async hashNewPassword(password: string): Promise<string> {
       return hashPassword(password);
     },
-
-    _rolesForUser: rolesForUser,
-    _effectiveRole: effectiveRole,
   };
 }
 

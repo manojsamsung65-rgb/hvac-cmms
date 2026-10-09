@@ -98,6 +98,7 @@ model MfaFactor {
   type           String    @default("totp")
   secret         String
   verifiedAt     DateTime?
+  lastTotpStep   Int?
   createdAt      DateTime  @default(now())
 
   user User @relation(fields: [organizationId, userId], references: [organizationId, id])

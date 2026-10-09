@@ -2,7 +2,7 @@ import express, { type Express } from 'express';
 import helmet from 'helmet';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
-import { env } from './config/env';
+import { env, trustProxySetting } from './config/env';
 import { requestLogger } from './middleware/requestLogger';
 import { apiRouter } from './routes';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler';
@@ -13,10 +13,14 @@ export interface AppDeps {
   repositories?: AuthRepositories;
 }
 
-// When repositories are provided, the authentication routes are mounted. Health
-// routes are always available. This keeps the app usable without a database.
 export function createApp(deps: AppDeps = {}): Express {
   const app = express();
+
+  // Trust only explicitly configured proxies; never arbitrary X-Forwarded-* headers.
+  const trustProxy = trustProxySetting();
+  if (trustProxy !== undefined) {
+    app.set('trust proxy', trustProxy);
+  }
 
   app.use(helmet());
   app.use(cors({ origin: env.CORS_ORIGIN, credentials: true }));

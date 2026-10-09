@@ -5,6 +5,7 @@ import { env } from '../../config/env';
 import { HttpError } from '../../middleware/errorHandler';
 import { createRequireAuth } from '../../middleware/requireAuth';
 import { csrfProtection } from '../../middleware/csrf';
+import { createAccountLimiter } from '../../middleware/rateLimit';
 import { SESSION_COOKIE } from '../../auth/session';
 import { createAuthService, type AuthService } from '../../auth/service';
 import type { AuthRepositories, AuthUser } from '../../auth/types';
@@ -29,8 +30,13 @@ export function createAuthRouter(repos: AuthRepositories, service?: AuthService)
     limit: 10,
     standardHeaders: true,
     legacyHeaders: false,
+    validate: false,
     message: { error: { code: 'rate_limited', message: 'Too many attempts, try again later' } },
   });
+  // Per-account + per-IP limits on MFA verification and recovery-code use, to
+  // resist brute force of 6-digit codes and recovery codes.
+  const mfaVerifyLimiter = createAccountLimiter({ windowMs: 15 * 60 * 1000, limit: 5 });
+  const mfaRecoveryLimiter = createAccountLimiter({ windowMs: 15 * 60 * 1000, limit: 5 });
 
   router.post('/auth/login', loginLimiter, async (req, res, next) => {
     try {
@@ -83,7 +89,7 @@ export function createAuthRouter(repos: AuthRepositories, service?: AuthService)
     }
   });
 
-  router.post('/auth/mfa/verify', requireAuth, csrfProtection, async (req, res, next) => {
+  router.post('/auth/mfa/verify', requireAuth, mfaVerifyLimiter, csrfProtection, async (req, res, next) => {
     try {
       if (!req.auth || !req.session) throw new HttpError(401, 'Authentication required', 'unauthenticated');
       const { token } = tokenSchema.parse(req.body);
@@ -93,7 +99,7 @@ export function createAuthRouter(repos: AuthRepositories, service?: AuthService)
     }
   });
 
-  router.post('/auth/mfa/recovery', requireAuth, csrfProtection, async (req, res, next) => {
+  router.post('/auth/mfa/recovery', requireAuth, mfaRecoveryLimiter, csrfProtection, async (req, res, next) => {
     try {
       if (!req.auth || !req.session) throw new HttpError(401, 'Authentication required', 'unauthenticated');
       const { code } = recoverySchema.parse(req.body);
