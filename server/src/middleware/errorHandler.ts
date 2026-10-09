@@ -31,6 +31,11 @@ export function errorHandler(
     });
     return;
   }
+  // Body-parser throws a SyntaxError with a `body` property on malformed JSON.
+  if (err instanceof SyntaxError && 'body' in err) {
+    res.status(400).json({ error: { code: 'invalid_json', message: 'Malformed JSON body' } });
+    return;
+  }
   if (err instanceof HttpError) {
     res.status(err.status).json({ error: { code: err.code, message: err.message } });
     return;

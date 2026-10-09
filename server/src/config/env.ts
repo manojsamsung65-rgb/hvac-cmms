@@ -7,7 +7,13 @@ const EnvSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().int().positive().default(4000),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
-  CORS_ORIGIN: z.string().default('http://localhost:5173'),
+  // Credentialed CORS cannot use a wildcard origin.
+  CORS_ORIGIN: z
+    .string()
+    .default('http://localhost:5173')
+    .refine((value) => value !== '*', {
+      message: "CORS_ORIGIN cannot be '*' because credentials are enabled",
+    }),
   DATABASE_URL: z.string().url().optional(),
   SESSION_SECRET: z.string().min(32).optional(),
 });
