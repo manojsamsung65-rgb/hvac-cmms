@@ -7,8 +7,8 @@ on:
     branches: [main]
 
 jobs:
-  build:
-    name: Lint, typecheck, test, build
+  web:
+    name: Web - lint, typecheck, test, build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -16,13 +16,56 @@ jobs:
         with:
           node-version: 20
           cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm run test
+      - run: npm run build
+
+  api:
+    name: API - lint, typecheck, unit, integration, build
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: hvac_cmms_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/hvac_cmms_test
+      SESSION_SECRET: ci-placeholder-not-a-real-secret-000000
+      NODE_ENV: test
+    defaults:
+      run:
+        working-directory: server
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: server/package-lock.json
       - name: Install
         run: npm ci
+      - name: Prisma generate
+        run: npx prisma generate
       - name: Lint
         run: npm run lint
       - name: Typecheck
         run: npm run typecheck
-      - name: Test
-        run: npm run test
+      - name: Unit tests
+        run: npm run test:unit
+      - name: Apply migrations
+        run: npx prisma migrate deploy
+      - name: Integration tests (ephemeral PostgreSQL)
+        run: npm run test:integration
       - name: Build
         run: npm run build

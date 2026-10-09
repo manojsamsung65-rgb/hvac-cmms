@@ -1,6 +1,6 @@
-// Prisma schema scaffolding. Migrations are NOT applied to any external database
-// in this milestone. Identity and tenancy models are defined first; module tables
-// follow in later milestones.
+// Prisma schema. Migrations are versioned in prisma/migrations and applied only
+// in CI (ephemeral Postgres) or a future managed database - never to an external
+// database from this environment.
 
 generator client {
   provider = "prisma-client-js"
@@ -28,33 +28,95 @@ model User {
   organizationId String
   email          String
   fullName       String
-  // Nullable until the authentication milestone; never store plaintext.
   passwordHash   String?
   isActive       Boolean  @default(true)
   isSuperAdmin   Boolean  @default(false)
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  organization Organization @relation(fields: [organizationId], references: [id])
-  sessions     Session[]
+  organization  Organization   @relation(fields: [organizationId], references: [id])
+  sessions      Session[]
+  userRoles     UserRole[]
+  mfaFactors    MfaFactor[]
+  recoveryCodes RecoveryCode[]
 
-  // Composite unique supports same-tenant composite foreign keys (defense in depth).
   @@unique([organizationId, id])
   @@unique([email])
   @@index([organizationId])
   @@map("users")
 }
 
-model Session {
-  id        String   @id @default(uuid())
-  userId    String
-  // Opaque session token is stored hashed, never in plaintext.
-  tokenHash String   @unique
-  expiresAt DateTime
-  createdAt DateTime @default(now())
+model Role {
+  id          String     @id @default(uuid())
+  name        String     @unique
+  description String?
+  userRoles   UserRole[]
 
-  user User @relation(fields: [userId], references: [id])
+  @@map("roles")
+}
+
+model UserRole {
+  id             String   @id @default(uuid())
+  organizationId String
+  userId         String
+  roleId         String
+  createdAt      DateTime @default(now())
+
+  user User @relation(fields: [organizationId, userId], references: [organizationId, id])
+  role Role @relation(fields: [roleId], references: [id])
+
+  @@unique([organizationId, userId, roleId])
+  @@index([userId])
+  @@map("user_roles")
+}
+
+model Session {
+  id                String    @id @default(uuid())
+  organizationId    String
+  userId            String
+  tokenHash         String    @unique
+  csrfToken         String
+  expiresAt         DateTime
+  absoluteExpiresAt DateTime
+  lastUsedAt        DateTime?
+  mfaVerifiedAt     DateTime?
+  revokedAt         DateTime?
+  ip                String?
+  userAgent         String?
+  createdAt         DateTime  @default(now())
+
+  user User @relation(fields: [organizationId, userId], references: [organizationId, id])
 
   @@index([userId])
   @@map("sessions")
+}
+
+model MfaFactor {
+  id             String    @id @default(uuid())
+  organizationId String
+  userId         String
+  type           String    @default("totp")
+  secret         String
+  verifiedAt     DateTime?
+  createdAt      DateTime  @default(now())
+
+  user User @relation(fields: [organizationId, userId], references: [organizationId, id])
+
+  @@unique([userId, type])
+  @@index([userId])
+  @@map("mfa_factors")
+}
+
+model RecoveryCode {
+  id             String    @id @default(uuid())
+  organizationId String
+  userId         String
+  codeHash       String    @unique
+  usedAt         DateTime?
+  createdAt      DateTime  @default(now())
+
+  user User @relation(fields: [organizationId, userId], references: [organizationId, id])
+
+  @@index([userId])
+  @@map("recovery_codes")
 }

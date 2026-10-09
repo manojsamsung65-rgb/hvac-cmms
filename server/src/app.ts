@@ -6,8 +6,16 @@ import { env } from './config/env';
 import { requestLogger } from './middleware/requestLogger';
 import { apiRouter } from './routes';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler';
+import { createAuthRouter } from './modules/auth/routes';
+import type { AuthRepositories } from './auth/types';
 
-export function createApp(): Express {
+export interface AppDeps {
+  repositories?: AuthRepositories;
+}
+
+// When repositories are provided, the authentication routes are mounted. Health
+// routes are always available. This keeps the app usable without a database.
+export function createApp(deps: AppDeps = {}): Express {
   const app = express();
 
   app.use(helmet());
@@ -17,6 +25,10 @@ export function createApp(): Express {
   app.use(requestLogger);
 
   app.use(apiRouter);
+
+  if (deps.repositories) {
+    app.use(createAuthRouter(deps.repositories));
+  }
 
   app.use(notFoundHandler);
   app.use(errorHandler);

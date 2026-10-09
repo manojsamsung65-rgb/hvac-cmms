@@ -12,19 +12,22 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "prisma:generate": "prisma generate",
-    "prisma:migrate": "prisma migrate dev"
+    "prisma:migrate": "prisma migrate dev",
+    "test:unit": "vitest run tests/unit",
+    "test:integration": "vitest run tests/integration"
   },
   "dependencies": {
+    "@node-rs/argon2": "^2.0.2",
     "@prisma/client": "^5.19.1",
     "cookie-parser": "^1.4.6",
     "cors": "^2.8.5",
     "express": "^4.19.2",
+    "express-rate-limit": "^7.4.0",
     "helmet": "^7.1.0",
+    "otplib": "^12.0.1",
     "pino": "^9.4.0",
     "pino-http": "^10.3.0",
-    "zod": "^3.23.8",
-    "@node-rs/argon2": "^2.0.2",
-    "otplib": "^12.0.1"
+    "zod": "^3.23.8"
   },
   "devDependencies": {
     "@types/cookie-parser": "^1.4.7",

@@ -3,8 +3,9 @@ import { createApp } from './app';
 import { env } from './config/env';
 import { logger } from './lib/logger';
 import { getPrisma } from './lib/prisma';
+import { createProductionRepositories } from './repositories';
 
-const app = createApp();
+const app = createApp({ repositories: createProductionRepositories() });
 const server: Server = app.listen(env.PORT, () => {
   logger.info(`hvac-cmms API listening on port ${env.PORT}`);
 });
@@ -16,7 +17,6 @@ async function shutdown(signal: string): Promise<void> {
   shuttingDown = true;
   logger.info({ signal }, 'Shutting down');
 
-  // Stop accepting new connections, then release resources.
   server.close(async () => {
     try {
       if (env.DATABASE_URL) {
@@ -29,7 +29,6 @@ async function shutdown(signal: string): Promise<void> {
     }
   });
 
-  // Hard fallback so a hung connection cannot block shutdown forever.
   setTimeout(() => process.exit(1), 10_000).unref();
 }
 
