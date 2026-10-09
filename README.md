@@ -67,3 +67,14 @@ tests/          # unit/ and e2e/
 
 `.github/workflows/ci.yml` runs lint, typecheck, unit tests and a production build on
 pushes and pull requests to `main`. It does not deploy.
+
+## Backend migration (in progress)
+
+The backend is migrating from the earlier Supabase proposal to **Node.js + Express +
+TypeScript + PostgreSQL (Prisma)**. See `hvac-cmms-backend-migration-plan.md`.
+
+- The API skeleton lives in `server/` (this milestone: configuration, health/readiness,
+  logging, error handling, Prisma scaffolding).
+- **Supabase references in the frontend are intentionally left in place** for now and
+  will be removed only once the API client replaces them and the change is tested.
+- Authentication, RBAC and tenant scoping are **not yet implemented**.

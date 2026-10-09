@@ -1,0 +1,60 @@
+// Prisma schema scaffolding. Migrations are NOT applied to any external database
+// in this milestone. Identity and tenancy models are defined first; module tables
+// follow in later milestones.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Organization {
+  id        String   @id @default(uuid())
+  name      String
+  slug      String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users User[]
+
+  @@map("organizations")
+}
+
+model User {
+  id             String   @id @default(uuid())
+  organizationId String
+  email          String
+  fullName       String
+  // Nullable until the authentication milestone; never store plaintext.
+  passwordHash   String?
+  isActive       Boolean  @default(true)
+  isSuperAdmin   Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+  sessions     Session[]
+
+  // Composite unique supports same-tenant composite foreign keys (defense in depth).
+  @@unique([organizationId, id])
+  @@unique([email])
+  @@index([organizationId])
+  @@map("users")
+}
+
+model Session {
+  id        String   @id @default(uuid())
+  userId    String
+  // Opaque session token is stored hashed, never in plaintext.
+  tokenHash String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@map("sessions")
+}
