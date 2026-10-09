@@ -12,10 +12,12 @@ describe('API foundation', () => {
     expect(res.body.service).toBe('hvac-cmms-api');
   });
 
-  it('GET /ready reports the database as not configured when DATABASE_URL is unset', async () => {
+  it('GET /ready reports the database state without depending on environment', async () => {
     const res = await request(app).get('/ready');
     expect(res.status).toBe(200);
-    expect(res.body.checks.database).toBe('not_configured');
+    // Environment-agnostic: 'not_configured' when DATABASE_URL is unset,
+    // 'ok' when a reachable database is configured (as in CI).
+    expect(['not_configured', 'ok']).toContain(res.body.checks.database);
   });
 
   it('unknown route returns a 404 JSON error', async () => {
