@@ -1,27 +1,20 @@
-name: CI
+name: CI (api)
 
 on:
   push:
     branches: [main]
+    paths:
+      - 'server/**'
+      - '.github/workflows/ci-api.yml'
   pull_request:
-    branches: [main]
+    paths:
+      - 'server/**'
+      - '.github/workflows/ci-api.yml'
+
+permissions:
+  contents: read
 
 jobs:
-  web:
-    name: Web - lint, typecheck, test, build
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
-      - run: npm ci
-      - run: npm run lint
-      - run: npm run typecheck
-      - run: npm run test
-      - run: npm run build
-
   api:
     name: API - lint, typecheck, unit, integration, build
     runs-on: ubuntu-latest
