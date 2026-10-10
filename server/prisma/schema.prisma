@@ -121,3 +121,111 @@ model RecoveryCode {
   @@index([userId])
   @@map("recovery_codes")
 }
+
+enum Criticality {
+  low
+  medium
+  high
+  critical
+}
+
+enum EquipmentStatus {
+  active
+  inactive
+  under_maintenance
+  retired
+}
+
+// Minimal supporting tables so equipment foreign keys are real and tenant-safe.
+// Full Site/Building CRUD is a later module; only create/list is exposed here.
+model Site {
+  id             String   @id @default(uuid())
+  organizationId String
+  name           String
+  code           String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  buildings Building[]
+  equipment Equipment[]
+
+  @@unique([organizationId, code])
+  @@unique([organizationId, id])
+  @@index([organizationId])
+  @@map("sites")
+}
+
+model Building {
+  id             String   @id @default(uuid())
+  organizationId String
+  siteId         String
+  name           String
+  code           String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  // Composite FK: the site must belong to the same organisation.
+  site      Site        @relation(fields: [organizationId, siteId], references: [organizationId, id])
+  equipment Equipment[]
+
+  @@unique([organizationId, code])
+  @@unique([organizationId, id])
+  @@index([organizationId])
+  @@index([organizationId, siteId])
+  @@map("buildings")
+}
+
+model Equipment {
+  id                String          @id @default(uuid())
+  organizationId    String
+  code              String
+  name              String
+  category          String
+  siteId            String?
+  buildingId        String?
+  location          String?
+  manufacturer      String?
+  model             String?
+  serialNumber      String?
+  criticality       Criticality     @default(medium)
+  status            EquipmentStatus @default(active)
+  commissioningDate DateTime?       @db.Date
+  warrantyProvider  String?
+  warrantyStart     DateTime?       @db.Date
+  warrantyEnd       DateTime?       @db.Date
+  maintenanceNotes  String?
+  deletedAt         DateTime?
+  createdBy         String?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+
+  // Composite FKs: a referenced site/building must belong to the same organisation.
+  site     Site?     @relation(fields: [organizationId, siteId], references: [organizationId, id])
+  building Building? @relation(fields: [organizationId, buildingId], references: [organizationId, id])
+
+  @@unique([organizationId, code])
+  @@unique([organizationId, id])
+  @@index([organizationId])
+  @@index([organizationId, status])
+  @@index([organizationId, category])
+  @@index([organizationId, siteId])
+  @@map("equipment")
+}
+
+// Append-only audit trail. Written server-side inside the same transaction as the
+// change it records; there is no API to update or delete these rows.
+model AuditLog {
+  id             String   @id @default(uuid())
+  organizationId String
+  actorId        String?
+  action         String
+  entityType     String
+  entityId       String
+  before         Json?
+  after          Json?
+  createdAt      DateTime @default(now())
+
+  @@index([organizationId])
+  @@index([organizationId, entityType, entityId])
+  @@map("audit_logs")
+}

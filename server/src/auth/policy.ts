@@ -7,8 +7,11 @@ export type Action =
   | 'organization:create'
   | 'settings:manage'
   | 'users:manage'
+  | 'sites:view'
   | 'sites:manage'
+  | 'equipment:view'
   | 'equipment:manage'
+  | 'equipment:delete'
   | 'pm:manage'
   | 'workorders:manage'
   | 'workorders:update_assigned'
@@ -18,7 +21,9 @@ export type Action =
   | 'records:delete';
 
 const SUPERVISOR: Action[] = [
+  'sites:view',
   'sites:manage',
+  'equipment:view',
   'equipment:manage',
   'pm:manage',
   'workorders:manage',
@@ -27,16 +32,25 @@ const SUPERVISOR: Action[] = [
   'reports:view',
 ];
 
-const TECHNICIAN: Action[] = ['workorders:update_assigned', 'checklists:execute', 'reports:view'];
+const TECHNICIAN: Action[] = [
+  'equipment:view',
+  'sites:view',
+  'workorders:update_assigned',
+  'checklists:execute',
+  'reports:view',
+];
 
-const READ_ONLY: Action[] = ['reports:view'];
+const READ_ONLY: Action[] = ['equipment:view', 'sites:view', 'reports:view'];
 
 const ALL: Action[] = [
   'organization:create',
   'settings:manage',
   'users:manage',
+  'sites:view',
   'sites:manage',
+  'equipment:view',
   'equipment:manage',
+  'equipment:delete',
   'pm:manage',
   'workorders:manage',
   'workorders:update_assigned',

@@ -50,3 +50,31 @@ npm run dev
   client input.
 - `requireAuth` / `getTenant` are placeholders documenting the intended contract;
   they are not wired to routes and authentication is not yet functional.
+
+## Equipment Register (Milestone 2)
+
+Tenant-scoped CRUD for HVAC equipment, with Sites and Buildings as minimal
+supporting records. Base path `/api/v1`. All routes require authentication, and the
+organisation id is always taken from the session's user record - never from the
+request.
+
+| Method | Path | RBAC action |
+| --- | --- | --- |
+| GET | `/api/v1/sites` | `sites:view` |
+| POST | `/api/v1/sites` | `sites:manage` |
+| GET | `/api/v1/buildings` | `sites:view` |
+| POST | `/api/v1/buildings` | `sites:manage` |
+| GET | `/api/v1/equipment` | `equipment:view` |
+| GET | `/api/v1/equipment/:id` | `equipment:view` |
+| POST | `/api/v1/equipment` | `equipment:manage` |
+| PATCH | `/api/v1/equipment/:id` | `equipment:manage` |
+| DELETE | `/api/v1/equipment/:id` | `equipment:delete` |
+
+- List responses use the envelope `{ data, page, pageSize, total }` (`pageSize` max 100).
+  Filters: `status`, `category`, `criticality`, `siteId`, `q`, `includeDeleted`.
+- Equipment codes are unique per organisation; a duplicate returns `409 duplicate_code`.
+- Deletion is soft (`deletedAt`); deleted rows are hidden unless `includeDeleted=true`.
+- Sites/Buildings are referenced by composite foreign keys `(organizationId, ...)`, so
+  an equipment row cannot reference another organisation's site or building.
+- Every create/update/delete writes exactly one append-only `audit_logs` row inside the
+  same database transaction as the change; there is no API to modify audit rows.
