@@ -2,15 +2,19 @@ import express, { type Express } from 'express';
 import helmet from 'helmet';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
+import type { PrismaClient } from '@prisma/client';
 import { env, trustProxySetting } from './config/env';
 import { requestLogger } from './middleware/requestLogger';
 import { apiRouter } from './routes';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler';
 import { createAuthRouter } from './modules/auth/routes';
+import { createEquipmentModule } from './modules/equipment/routes';
+import { getPrisma } from './lib/prisma';
 import type { AuthRepositories } from './auth/types';
 
 export interface AppDeps {
   repositories?: AuthRepositories;
+  prisma?: PrismaClient;
 }
 
 export function createApp(deps: AppDeps = {}): Express {
@@ -32,6 +36,7 @@ export function createApp(deps: AppDeps = {}): Express {
 
   if (deps.repositories) {
     app.use(createAuthRouter(deps.repositories));
+    app.use(createEquipmentModule({ prisma: deps.prisma ?? getPrisma(), authRepositories: deps.repositories }));
   }
 
   app.use(notFoundHandler);
