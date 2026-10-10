@@ -182,6 +182,42 @@ describe.skipIf(!hasDb)('auth integration (PostgreSQL)', () => {
     expect(removed).toBeGreaterThanOrEqual(1);
   });
 
+  it('does not let two concurrent requests accept the same TOTP step', async () => {
+    const repos = createPrismaRepositories(prisma);
+    await prisma.mfaFactor.deleteMany({ where: { organizationId: orgAId } });
+    await repos.recovery.replaceForUser(orgAId, userAId, []);
+
+    const app = buildApp();
+    const login = await request(app).post('/auth/login').send({ email: emailA, password });
+    const cookie = cookieOf(login);
+    const csrf = login.body.csrfToken;
+    const enroll = await request(app).post('/auth/mfa/enroll').set('Cookie', cookie).set('x-csrf-token', csrf);
+    const code = generateTotp(enroll.body.secret);
+
+    const fire = () =>
+      request(app).post('/auth/mfa/verify').set('Cookie', cookie).set('x-csrf-token', csrf).send({ token: code });
+    const [a, b] = await Promise.all([fire(), fire()]);
+    const statuses = [a.status, b.status].sort((x, y) => x - y);
+    expect(statuses).toEqual([200, 401]);
+  });
+
+  it('does not let two concurrent requests consume the same recovery code', async () => {
+    const repos = createPrismaRepositories(prisma);
+    const code = 'ZZZZZ-YYYYY-XXXXX-WWWWW';
+    await repos.recovery.replaceForUser(orgAId, userAId, [hashRecoveryCode(code)]);
+
+    const app = buildApp();
+    const login = await request(app).post('/auth/login').send({ email: emailA, password });
+    const cookie = cookieOf(login);
+    const csrf = login.body.csrfToken;
+
+    const fire = () =>
+      request(app).post('/auth/mfa/recovery').set('Cookie', cookie).set('x-csrf-token', csrf).send({ code });
+    const [a, b] = await Promise.all([fire(), fire()]);
+    const statuses = [a.status, b.status].sort((x, y) => x - y);
+    expect(statuses).toEqual([200, 401]);
+  });
+
   it('prevents recovery-code replay', async () => {
     const repos = createPrismaRepositories(prisma);
     const code = 'AAAAA-BBBBB-CCCCC-DDDDD';

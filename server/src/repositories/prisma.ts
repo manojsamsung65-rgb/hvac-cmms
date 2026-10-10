@@ -13,8 +13,6 @@ function toRole(names: string[]): Role {
   return effectiveRole(names.filter(isRole));
 }
 
-// Prisma-backed repositories. Every tenant-scoped read is filtered by
-// organizationId taken from the user record - never from client input.
 export function createPrismaRepositories(prisma: PrismaClient): AuthRepositories {
   async function rolesOf(userId: string): Promise<string[]> {
     const rows = await prisma.userRole.findMany({ where: { userId }, include: { role: true } });
@@ -76,11 +74,14 @@ export function createPrismaRepositories(prisma: PrismaClient): AuthRepositories
           update: { secret: input.secret, verifiedAt: null, lastTotpStep: null },
         });
       },
-      async markVerified(userId: string, type: string, at: Date): Promise<void> {
-        await prisma.mfaFactor.update({ where: { userId_type: { userId, type } }, data: { verifiedAt: at } });
-      },
-      async setLastTotpStep(userId: string, type: string, step: number): Promise<void> {
-        await prisma.mfaFactor.update({ where: { userId_type: { userId, type } }, data: { lastTotpStep: step } });
+      // Atomic compare-and-set: only succeeds if the stored step is null or older
+      // than `step`. A concurrent caller that already advanced it makes count 0.
+      async claimTotpStep(userId: string, type: string, step: number, at: Date): Promise<boolean> {
+        const res = await prisma.mfaFactor.updateMany({
+          where: { userId, type, OR: [{ lastTotpStep: null }, { lastTotpStep: { lt: step } }] },
+          data: { lastTotpStep: step, verifiedAt: at },
+        });
+        return res.count === 1;
       },
     },
     recovery: {
@@ -94,8 +95,12 @@ export function createPrismaRepositories(prisma: PrismaClient): AuthRepositories
           prisma.recoveryCode.createMany({ data: hashes.map((codeHash) => ({ organizationId, userId, codeHash })) }),
         ]);
       },
-      async markUsedByHash(codeHash: string, at: Date): Promise<void> {
-        await prisma.recoveryCode.updateMany({ where: { codeHash }, data: { usedAt: at } });
+      async claimRecoveryCode(codeHash: string, at: Date): Promise<boolean> {
+        const res = await prisma.recoveryCode.updateMany({
+          where: { codeHash, usedAt: null },
+          data: { usedAt: at },
+        });
+        return res.count === 1;
       },
     },
   };

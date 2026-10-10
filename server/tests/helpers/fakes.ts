@@ -89,13 +89,13 @@ export function createFakeRepositories(): AuthRepositories & { seedUser(u: UserW
         factors.set(`${input.userId}:${input.type}`, record);
         return record;
       },
-      async markVerified(userId, type, at) {
+      async claimTotpStep(userId, type, step, at) {
         const f = factors.get(`${userId}:${type}`);
-        if (f) f.verifiedAt = at;
-      },
-      async setLastTotpStep(userId, type, step) {
-        const f = factors.get(`${userId}:${type}`);
-        if (f) f.lastTotpStep = step;
+        if (!f) return false;
+        if (f.lastTotpStep !== null && f.lastTotpStep >= step) return false;
+        f.lastTotpStep = step;
+        f.verifiedAt = at;
+        return true;
       },
     },
     recovery: {
@@ -108,9 +108,11 @@ export function createFakeRepositories(): AuthRepositories & { seedUser(u: UserW
         for (const [hash, v] of recovery) if (v.userId === userId) recovery.delete(hash);
         for (const hash of hashes) recovery.set(hash, { userId, usedAt: null });
       },
-      async markUsedByHash(hash, at) {
+      async claimRecoveryCode(hash, at) {
         const r = recovery.get(hash);
-        if (r) r.usedAt = at;
+        if (!r || r.usedAt !== null) return false;
+        r.usedAt = at;
+        return true;
       },
     },
     seedUser(u) {

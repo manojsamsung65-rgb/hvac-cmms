@@ -55,9 +55,7 @@ export interface SessionRepository {
   revokeByTokenHash(tokenHash: string): Promise<void>;
   revokeAllForUser(userId: string): Promise<void>;
   setMfaVerified(sessionId: string, at: Date): Promise<void>;
-  // Sliding idle timeout: records last-used time and extends the idle expiry.
   touch(sessionId: string, at: Date, newIdleExpiry: Date): Promise<void>;
-  // Removes sessions past their absolute expiry; returns the number removed.
   cleanupExpiredSessions(now: Date): Promise<number>;
 }
 
@@ -69,14 +67,18 @@ export interface MfaRepository {
     type: string;
     secret: string; // encrypted
   }): Promise<MfaFactorRecord>;
-  markVerified(userId: string, type: string, at: Date): Promise<void>;
-  setLastTotpStep(userId: string, type: string, step: number): Promise<void>;
+  // Atomically claims a TOTP time-step. Returns true only if this call advanced
+  // lastTotpStep to `step` (i.e. the step had not been used). This makes replay
+  // protection safe under concurrent requests: exactly one caller can win.
+  claimTotpStep(userId: string, type: string, step: number, at: Date): Promise<boolean>;
 }
 
 export interface RecoveryCodeRepository {
   listHashesForUser(userId: string): Promise<string[]>;
   replaceForUser(organizationId: string, userId: string, hashes: string[]): Promise<void>;
-  markUsedByHash(hash: string, at: Date): Promise<void>;
+  // Atomically marks a recovery code used. Returns true only if this call was the
+  // one that consumed it, so single-use holds under concurrent requests.
+  claimRecoveryCode(codeHash: string, at: Date): Promise<boolean>;
 }
 
 export interface AuthRepositories {
