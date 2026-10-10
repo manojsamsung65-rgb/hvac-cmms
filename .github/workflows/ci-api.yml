@@ -18,20 +18,6 @@ jobs:
   api:
     name: API - lint, typecheck, unit, integration, build
     runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: hvac_cmms_test
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U postgres"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
     env:
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/hvac_cmms_test
       SESSION_SECRET: ci-placeholder-not-a-real-secret-000000
@@ -47,6 +33,13 @@ jobs:
           node-version: 20
           cache: npm
           cache-dependency-path: server/package-lock.json
+      # PostgreSQL is installed from the runner's package repository rather than a
+      # Docker service container, to avoid Docker Hub pull rate limits.
+      - name: Start PostgreSQL
+        run: |
+          sudo service postgresql start
+          sudo -u postgres psql -c "ALTER USER postgres PASSWORD 'postgres';"
+          sudo -u postgres createdb hvac_cmms_test
       - name: Install
         run: npm ci
       - name: Prisma generate
@@ -59,7 +52,7 @@ jobs:
         run: npm run test:unit
       - name: Apply migrations
         run: npx prisma migrate deploy
-      - name: Integration tests (ephemeral PostgreSQL)
+      - name: Integration tests
         run: npm run test:integration
       - name: Build
         run: npm run build
