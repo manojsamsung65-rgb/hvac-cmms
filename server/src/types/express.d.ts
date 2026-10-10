@@ -1,12 +1,14 @@
-// Request augmentation for the authenticated context. Populated only once real
-// authentication exists; optional for now.
+import type { Role } from '../auth/policy';
+
+// Request augmentation for the authenticated context. Populated by requireAuth.
 declare global {
   namespace Express {
     interface Request {
       auth?: {
         userId: string;
         organizationId: string;
-        role: string;
+        role: Role;
+        aal: 'aal1' | 'aal2';
       };
     }
   }
