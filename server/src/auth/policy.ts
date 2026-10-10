@@ -27,11 +27,7 @@ const SUPERVISOR: Action[] = [
   'reports:view',
 ];
 
-const TECHNICIAN: Action[] = [
-  'workorders:update_assigned',
-  'checklists:execute',
-  'reports:view',
-];
+const TECHNICIAN: Action[] = ['workorders:update_assigned', 'checklists:execute', 'reports:view'];
 
 const READ_ONLY: Action[] = ['reports:view'];
 
@@ -50,7 +46,6 @@ const ALL: Action[] = [
   'records:delete',
 ];
 
-// Admin: everything except creating new tenants (Super Admin only).
 const ADMIN: Action[] = ALL.filter((a) => a !== 'organization:create');
 
 const MATRIX: Record<Role, ReadonlySet<Action>> = {
@@ -61,10 +56,21 @@ const MATRIX: Record<Role, ReadonlySet<Action>> = {
   read_only: new Set(READ_ONLY),
 };
 
+// Privilege order, highest first. Used to derive a single effective role when a
+// user holds several roles.
+const PRIVILEGE_ORDER: Role[] = ['super_admin', 'admin', 'supervisor', 'technician', 'read_only'];
+
 export function can(role: Role, action: Action): boolean {
   return MATRIX[role]?.has(action) ?? false;
 }
 
 export function isRole(value: string): value is Role {
   return value in MATRIX;
+}
+
+export function effectiveRole(roles: readonly Role[]): Role {
+  for (const role of PRIVILEGE_ORDER) {
+    if (roles.includes(role)) return role;
+  }
+  return 'read_only';
 }

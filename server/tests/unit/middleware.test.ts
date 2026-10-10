@@ -12,11 +12,7 @@ import type { AuthUser, SessionRecord } from '../../src/auth/types';
 
 const NOW = new Date('2026-10-10T00:00:00Z');
 
-function buildApp(opts: {
-  session?: SessionRecord | null;
-  user?: AuthUser | null;
-  cookie?: string;
-}): Express {
+function buildApp(opts: { session?: SessionRecord | null; user?: AuthUser | null }): Express {
   const app = express();
   app.use(cookieParser());
 
@@ -24,18 +20,36 @@ function buildApp(opts: {
     async findByTokenHash(hash: string) {
       return opts.session && opts.session.tokenHash === hash ? opts.session : null;
     },
+    async create() {
+      throw new Error('not used');
+    },
+    async revokeByTokenHash() {
+      /* not used */
+    },
+    async revokeAllForUser() {
+      /* not used */
+    },
+    async setMfaVerified() {
+      /* not used */
+    },
+    async touch() {
+      /* not used */
+    },
   };
   const users = {
     async findById(id: string) {
       return opts.user && opts.user.id === id ? opts.user : null;
+    },
+    async findByEmail() {
+      return null;
     },
   };
 
   const requireAuth = createRequireAuth({ sessions, users, now: () => NOW });
 
   app.get('/protected', requireAuth, (req, res) => res.json({ auth: req.auth }));
-  app.get('/admin', requireAuth, authorize('settings:manage'), (req, res) => res.json({ ok: true }));
-  app.get('/admin-mfa', requireAuth, requireMfa, (req, res) => res.json({ ok: true }));
+  app.get('/admin', requireAuth, authorize('settings:manage'), (_req, res) => res.json({ ok: true }));
+  app.get('/admin-mfa', requireAuth, requireMfa, (_req, res) => res.json({ ok: true }));
   app.use(notFoundHandler);
   app.use(errorHandler);
   return app;
@@ -44,8 +58,10 @@ function buildApp(opts: {
 function makeSession(overrides: Partial<SessionRecord> = {}): SessionRecord {
   return {
     id: 'sess-1',
+    organizationId: 'org-1',
     userId: 'user-1',
     tokenHash: 'placeholder',
+    csrfToken: 'csrf-token',
     expiresAt: new Date(NOW.getTime() + 60 * 60 * 1000),
     absoluteExpiresAt: new Date(NOW.getTime() + 7 * 24 * 60 * 60 * 1000),
     revokedAt: null,
@@ -66,7 +82,7 @@ describe('requireAuth', () => {
 
   it('accepts a valid session and attaches the authenticated context', async () => {
     const { token, tokenHash } = generateSessionToken();
-    const app = buildApp({ session: makeSession({ tokenHash }), user: adminUser, cookie: token });
+    const app = buildApp({ session: makeSession({ tokenHash }), user: adminUser });
     const res = await request(app).get('/protected').set('Cookie', `${SESSION_COOKIE}=${token}`);
     expect(res.status).toBe(200);
     expect(res.body.auth.organizationId).toBe('org-1');
