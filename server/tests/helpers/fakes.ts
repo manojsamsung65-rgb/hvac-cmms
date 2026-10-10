@@ -56,8 +56,21 @@ export function createFakeRepositories(): AuthRepositories & { seedUser(u: UserW
         const s = sessionsById.get(id);
         if (s) s.mfaVerifiedAt = at;
       },
-      async touch() {
-        /* no-op */
+      async touch(id, at, newIdleExpiry) {
+        const s = sessionsById.get(id);
+        if (s) s.expiresAt = newIdleExpiry;
+        void at;
+      },
+      async cleanupExpiredSessions(now) {
+        let removed = 0;
+        for (const [hash, s] of sessionsByHash) {
+          if (s.absoluteExpiresAt.getTime() < now.getTime()) {
+            sessionsByHash.delete(hash);
+            sessionsById.delete(s.id);
+            removed++;
+          }
+        }
+        return removed;
       },
     },
     mfa: {
@@ -71,6 +84,7 @@ export function createFakeRepositories(): AuthRepositories & { seedUser(u: UserW
           type: input.type,
           secret: input.secret,
           verifiedAt: null,
+          lastTotpStep: null,
         };
         factors.set(`${input.userId}:${input.type}`, record);
         return record;
@@ -78,6 +92,10 @@ export function createFakeRepositories(): AuthRepositories & { seedUser(u: UserW
       async markVerified(userId, type, at) {
         const f = factors.get(`${userId}:${type}`);
         if (f) f.verifiedAt = at;
+      },
+      async setLastTotpStep(userId, type, step) {
+        const f = factors.get(`${userId}:${type}`);
+        if (f) f.lastTotpStep = step;
       },
     },
     recovery: {

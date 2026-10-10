@@ -17,10 +17,7 @@ function toRole(names: string[]): Role {
 // organizationId taken from the user record - never from client input.
 export function createPrismaRepositories(prisma: PrismaClient): AuthRepositories {
   async function rolesOf(userId: string): Promise<string[]> {
-    const rows = await prisma.userRole.findMany({
-      where: { userId },
-      include: { role: true },
-    });
+    const rows = await prisma.userRole.findMany({ where: { userId }, include: { role: true } });
     return rows.map((r) => r.role.name);
   }
 
@@ -29,17 +26,15 @@ export function createPrismaRepositories(prisma: PrismaClient): AuthRepositories
       async findById(id: string): Promise<AuthUser | null> {
         const user = await prisma.user.findUnique({ where: { id } });
         if (!user) return null;
-        const role = toRole(await rolesOf(user.id));
-        return { id: user.id, organizationId: user.organizationId, role, isActive: user.isActive };
+        return { id: user.id, organizationId: user.organizationId, role: toRole(await rolesOf(user.id)), isActive: user.isActive };
       },
       async findByEmail(email: string): Promise<UserWithSecret | null> {
         const user = await prisma.user.findUnique({ where: { email } });
         if (!user) return null;
-        const role = toRole(await rolesOf(user.id));
         return {
           id: user.id,
           organizationId: user.organizationId,
-          role,
+          role: toRole(await rolesOf(user.id)),
           isActive: user.isActive,
           email: user.email,
           passwordHash: user.passwordHash,
@@ -62,8 +57,12 @@ export function createPrismaRepositories(prisma: PrismaClient): AuthRepositories
       async setMfaVerified(sessionId: string, at: Date): Promise<void> {
         await prisma.session.update({ where: { id: sessionId }, data: { mfaVerifiedAt: at } });
       },
-      async touch(sessionId: string, at: Date): Promise<void> {
-        await prisma.session.update({ where: { id: sessionId }, data: { lastUsedAt: at } });
+      async touch(sessionId: string, at: Date, newIdleExpiry: Date): Promise<void> {
+        await prisma.session.update({ where: { id: sessionId }, data: { lastUsedAt: at, expiresAt: newIdleExpiry } });
+      },
+      async cleanupExpiredSessions(now: Date): Promise<number> {
+        const res = await prisma.session.deleteMany({ where: { absoluteExpiresAt: { lt: now } } });
+        return res.count;
       },
     },
     mfa: {
@@ -74,11 +73,14 @@ export function createPrismaRepositories(prisma: PrismaClient): AuthRepositories
         return prisma.mfaFactor.upsert({
           where: { userId_type: { userId: input.userId, type: input.type } },
           create: input,
-          update: { secret: input.secret, verifiedAt: null },
+          update: { secret: input.secret, verifiedAt: null, lastTotpStep: null },
         });
       },
       async markVerified(userId: string, type: string, at: Date): Promise<void> {
         await prisma.mfaFactor.update({ where: { userId_type: { userId, type } }, data: { verifiedAt: at } });
+      },
+      async setLastTotpStep(userId: string, type: string, step: number): Promise<void> {
+        await prisma.mfaFactor.update({ where: { userId_type: { userId, type } }, data: { lastTotpStep: step } });
       },
     },
     recovery: {
@@ -89,9 +91,7 @@ export function createPrismaRepositories(prisma: PrismaClient): AuthRepositories
       async replaceForUser(organizationId: string, userId: string, hashes: string[]): Promise<void> {
         await prisma.$transaction([
           prisma.recoveryCode.deleteMany({ where: { userId } }),
-          prisma.recoveryCode.createMany({
-            data: hashes.map((codeHash) => ({ organizationId, userId, codeHash })),
-          }),
+          prisma.recoveryCode.createMany({ data: hashes.map((codeHash) => ({ organizationId, userId, codeHash })) }),
         ]);
       },
       async markUsedByHash(codeHash: string, at: Date): Promise<void> {

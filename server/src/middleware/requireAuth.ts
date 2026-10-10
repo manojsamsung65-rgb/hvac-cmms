@@ -1,6 +1,6 @@
 import type { NextFunction, Request, Response } from 'express';
 import { HttpError } from './errorHandler';
-import { SESSION_COOKIE, assuranceLevel, isSessionActive } from '../auth/session';
+import { SESSION_COOKIE, assuranceLevel, isSessionActive, nextIdleExpiry } from '../auth/session';
 import { hashSessionToken } from '../lib/session-token';
 import type { SessionRepository, UserRepository } from '../auth/types';
 
@@ -11,9 +11,9 @@ export interface RequireAuthDeps {
 }
 
 // Factory so repositories can be injected (Prisma repos in production, fakes in
-// tests). Resolves the session cookie, validates it, loads the user, and attaches
-// the authenticated context plus the resolved session record. The organisation id
-// comes ONLY from the stored user record - never from client input.
+// tests). Resolves the session cookie, validates it, loads the user, slides the
+// idle expiry, and attaches the authenticated context. The organisation id comes
+// ONLY from the stored user record - never from client input.
 export function createRequireAuth(deps: RequireAuthDeps) {
   const now = deps.now ?? (() => new Date());
 
@@ -23,11 +23,16 @@ export function createRequireAuth(deps: RequireAuthDeps) {
       if (!token) throw new HttpError(401, 'Authentication required', 'unauthenticated');
 
       const session = await deps.sessions.findByTokenHash(hashSessionToken(token));
-      if (!session || !isSessionActive(session, now())) {
+      const at = now();
+      if (!session || !isSessionActive(session, at)) {
         throw new HttpError(401, 'Session is invalid or expired', 'unauthenticated');
       }
       const user = await deps.users.findById(session.userId);
       if (!user || !user.isActive) throw new HttpError(401, 'Account is not active', 'unauthenticated');
+
+      // Sliding idle timeout (never beyond the absolute expiry).
+      const newExpiry = nextIdleExpiry(session, at);
+      await deps.sessions.touch(session.id, at, newExpiry);
 
       req.auth = {
         userId: user.id,
@@ -35,7 +40,7 @@ export function createRequireAuth(deps: RequireAuthDeps) {
         role: user.role,
         aal: assuranceLevel(session),
       };
-      req.session = session;
+      req.session = { ...session, expiresAt: newExpiry };
       next();
     } catch (err) {
       next(err);

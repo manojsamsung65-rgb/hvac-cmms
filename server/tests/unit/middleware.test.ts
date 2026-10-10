@@ -35,6 +35,9 @@ function buildApp(opts: { session?: SessionRecord | null; user?: AuthUser | null
     async touch() {
       /* not used */
     },
+    async cleanupExpiredSessions() {
+      return 0;
+    },
   };
   const users = {
     async findById(id: string) {

@@ -10,6 +10,7 @@ import { errorHandler, notFoundHandler } from '../../src/middleware/errorHandler
 import { createPrismaRepositories } from '../../src/repositories/prisma';
 import { hashPassword } from '../../src/lib/password';
 import { generateTotp } from '../../src/lib/totp';
+import { hashRecoveryCode } from '../../src/lib/recovery-codes';
 
 // These tests require a real PostgreSQL database. They run in CI against an
 // ephemeral Postgres service; locally they are skipped when DATABASE_URL is unset.
@@ -132,39 +133,77 @@ describe.skipIf(!hasDb)('auth integration (PostgreSQL)', () => {
     ).rejects.toThrow();
   });
 
+  it('rate-limits MFA verification brute force', async () => {
+    const app = buildApp();
+    const login = await request(app).post('/auth/login').send({ email: emailA, password });
+    const cookie = cookieOf(login);
+    const csrf = login.body.csrfToken;
+    let limited = false;
+    for (let i = 0; i < 8; i++) {
+      const res = await request(app)
+        .post('/auth/mfa/verify')
+        .set('Cookie', cookie)
+        .set('x-csrf-token', csrf)
+        .send({ token: '000000' });
+      if (res.status === 429) {
+        limited = true;
+        break;
+      }
+    }
+    expect(limited).toBe(true);
+  });
+
+  it('rejects replaying the same TOTP code', async () => {
+    const app = buildApp();
+    const login = await request(app).post('/auth/login').send({ email: emailA, password });
+    const cookie = cookieOf(login);
+    const csrf = login.body.csrfToken;
+    const enroll = await request(app).post('/auth/mfa/enroll').set('Cookie', cookie).set('x-csrf-token', csrf);
+    const code = generateTotp(enroll.body.secret);
+    const first = await request(app).post('/auth/mfa/verify').set('Cookie', cookie).set('x-csrf-token', csrf).send({ token: code });
+    expect(first.status).toBe(200);
+    const replay = await request(app).post('/auth/mfa/verify').set('Cookie', cookie).set('x-csrf-token', csrf).send({ token: code });
+    expect(replay.status).toBe(401);
+  });
+
+  it('cleans up expired sessions', async () => {
+    const repos = createPrismaRepositories(prisma);
+    await prisma.session.create({
+      data: {
+        organizationId: orgAId,
+        userId: userAId,
+        tokenHash: 'expired-' + Math.random().toString(36).slice(2),
+        csrfToken: 'c',
+        expiresAt: new Date(Date.now() - 1000),
+        absoluteExpiresAt: new Date(Date.now() - 1000),
+      },
+    });
+    const removed = await repos.sessions.cleanupExpiredSessions(new Date());
+    expect(removed).toBeGreaterThanOrEqual(1);
+  });
+
   it('prevents recovery-code replay', async () => {
+    const repos = createPrismaRepositories(prisma);
+    const code = 'AAAAA-BBBBB-CCCCC-DDDDD';
+    await repos.recovery.replaceForUser(orgAId, userAId, [hashRecoveryCode(code)]);
+
     const app = buildApp();
     const login = await request(app).post('/auth/login').send({ email: emailA, password });
     const cookie = cookieOf(login);
     const csrf = login.body.csrfToken;
 
-    const enroll = await request(app)
-      .post('/auth/mfa/enroll')
-      .set('Cookie', cookie)
-      .set('x-csrf-token', csrf);
-    expect(enroll.status).toBe(200);
-
-    const verify = await request(app)
-      .post('/auth/mfa/verify')
-      .set('Cookie', cookie)
-      .set('x-csrf-token', csrf)
-      .send({ token: generateTotp(enroll.body.secret) });
-    expect(verify.status).toBe(200);
-    const codes: string[] = verify.body.recoveryCodes;
-    expect(codes.length).toBeGreaterThan(0);
-
     const first = await request(app)
       .post('/auth/mfa/recovery')
       .set('Cookie', cookie)
       .set('x-csrf-token', csrf)
-      .send({ code: codes[0] });
+      .send({ code });
     expect(first.status).toBe(200);
 
     const replay = await request(app)
       .post('/auth/mfa/recovery')
       .set('Cookie', cookie)
       .set('x-csrf-token', csrf)
-      .send({ code: codes[0] });
+      .send({ code });
     expect(replay.status).toBe(401);
   });
 });
