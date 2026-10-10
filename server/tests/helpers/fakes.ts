@@ -89,13 +89,13 @@ export function createFakeRepositories(): AuthRepositories & { seedUser(u: UserW
         factors.set(`${input.userId}:${input.type}`, record);
         return record;
       },
-      async markVerified(userId, type, at) {
+      async claimTotpStep(userId, type, step, at) {
         const f = factors.get(`${userId}:${type}`);
-        if (f) f.verifiedAt = at;
-      },
-      async setLastTotpStep(userId, type, step) {
-        const f = factors.get(`${userId}:${type}`);
-        if (f) f.lastTotpStep = step;
+        if (!f) return false;
+        if (f.lastTotpStep !== null && f.lastTotpStep >= step) return false;
+        f.lastTotpStep = step;
+        f.verifiedAt = at;
+        return true;
       },
     },
     recovery: {

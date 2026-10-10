@@ -12,8 +12,6 @@ import type { AuthRepositories, AuthUser, SessionRecord } from './types';
 
 const MFA_ISSUER = 'HVAC CMMS';
 
-// A dummy hash used to equalise timing when an account does not exist, so login
-// does not reveal whether an email is registered.
 const DUMMY_HASH =
   '$argon2id$v=19$m=19456,t=2,p=1$c2FsdHNhbHRzYWx0c2FsdA$0000000000000000000000000000000000000000000';
 
@@ -36,8 +34,6 @@ function invalidCredentials(): HttpError {
   return new HttpError(401, 'Invalid email or password', 'invalid_credentials');
 }
 
-// A single, generic failure for any MFA verification problem so that failed
-// attempts do not reveal whether a code, factor, or recovery token was valid.
 function invalidMfa(): HttpError {
   return new HttpError(401, 'Invalid verification code', 'invalid_mfa_code');
 }
@@ -46,11 +42,7 @@ export function createAuthService(deps: AuthServiceDeps) {
   const now = deps.now ?? (() => new Date());
 
   return {
-    async login(
-      email: string,
-      password: string,
-      ctx: { ip?: string; userAgent?: string },
-    ): Promise<LoginResult> {
+    async login(email: string, password: string, ctx: { ip?: string; userAgent?: string }): Promise<LoginResult> {
       const user = await deps.users.findByEmail(email.toLowerCase().trim());
       if (!user || !user.passwordHash) {
         await verifyPassword(DUMMY_HASH, password);
@@ -71,11 +63,7 @@ export function createAuthService(deps: AuthServiceDeps) {
         ip: ctx.ip,
         userAgent: ctx.userAgent,
       });
-      return {
-        token,
-        csrfToken: session.csrfToken,
-        user: { id: user.id, organizationId: user.organizationId, role: user.role, aal: 'aal1' },
-      };
+      return { token, csrfToken: session.csrfToken, user: { id: user.id, organizationId: user.organizationId, role: user.role, aal: 'aal1' } };
     },
 
     async logout(token: string): Promise<void> {
@@ -86,12 +74,7 @@ export function createAuthService(deps: AuthServiceDeps) {
       const user = await deps.users.findById(session.userId);
       if (!user) throw new HttpError(401, 'Account is not active', 'unauthenticated');
       return {
-        user: {
-          id: user.id,
-          organizationId: user.organizationId,
-          role: user.role,
-          aal: session.mfaVerifiedAt ? 'aal2' : 'aal1',
-        },
+        user: { id: user.id, organizationId: user.organizationId, role: user.role, aal: session.mfaVerifiedAt ? 'aal2' : 'aal1' },
         csrfToken: session.csrfToken,
       };
     },
@@ -104,30 +87,16 @@ export function createAuthService(deps: AuthServiceDeps) {
         secret = decryptSecret(existing.secret, key);
       } else {
         secret = generateTotpSecret();
-        await deps.mfa.upsertFactor({
-          organizationId: user.organizationId,
-          userId: user.id,
-          type: 'totp',
-          secret: encryptSecret(secret, key),
-        });
+        await deps.mfa.upsertFactor({ organizationId: user.organizationId, userId: user.id, type: 'totp', secret: encryptSecret(secret, key) });
       }
       return { secret, uri: totpKeyUri(`user:${user.id}`, MFA_ISSUER, secret) };
     },
 
-    async verifyMfa(
-      user: AuthUser,
-      session: SessionRecord,
-      token: string,
-    ): Promise<{ recoveryCodes: string[] }> {
+    async verifyMfa(user: AuthUser, session: SessionRecord, token: string): Promise<{ recoveryCodes: string[] }> {
       const key = getMfaEncryptionKey();
       const factor = await deps.mfa.getFactor(user.id, 'totp');
       if (!factor) throw invalidMfa();
 
-      // Replay protection: reject a code from the current or any earlier step.
-      const step = currentTotpStep(now().getTime());
-      if (factor.lastTotpStep !== null && step <= factor.lastTotpStep) {
-        throw invalidMfa();
-      }
       let secret: string;
       try {
         secret = decryptSecret(factor.secret, key);
@@ -136,29 +105,25 @@ export function createAuthService(deps: AuthServiceDeps) {
       }
       if (!verifyTotp(secret, token)) throw invalidMfa();
 
+      // Atomic claim of this TOTP step. Concurrent requests with the same code
+      // race here; exactly one advances lastTotpStep and succeeds.
       const at = now();
-      await deps.mfa.markVerified(user.id, 'totp', at);
-      await deps.mfa.setLastTotpStep(user.id, 'totp', step);
+      const step = currentTotpStep(at.getTime());
+      const claimed = await deps.mfa.claimTotpStep(user.id, 'totp', step, at);
+      if (!claimed) throw invalidMfa();
+
       await deps.sessions.setMfaVerified(session.id, at);
 
       const existing = await deps.recovery.listHashesForUser(user.id);
       let recoveryCodes: string[] = [];
       if (existing.length === 0) {
         recoveryCodes = generateRecoveryCodes();
-        await deps.recovery.replaceForUser(
-          user.organizationId,
-          user.id,
-          recoveryCodes.map(hashRecoveryCode),
-        );
+        await deps.recovery.replaceForUser(user.organizationId, user.id, recoveryCodes.map(hashRecoveryCode));
       }
       return { recoveryCodes };
     },
 
-    async consumeRecovery(
-      user: AuthUser,
-      session: SessionRecord,
-      code: string,
-    ): Promise<{ remaining: number }> {
+    async consumeRecovery(user: AuthUser, session: SessionRecord, code: string): Promise<{ remaining: number }> {
       const hashes = await deps.recovery.listHashesForUser(user.id);
       const result = consumeRecoveryCode(code, hashes);
       if (!result.ok) throw invalidMfa();
