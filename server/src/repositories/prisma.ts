@@ -95,8 +95,12 @@ export function createPrismaRepositories(prisma: PrismaClient): AuthRepositories
           prisma.recoveryCode.createMany({ data: hashes.map((codeHash) => ({ organizationId, userId, codeHash })) }),
         ]);
       },
-      async markUsedByHash(codeHash: string, at: Date): Promise<void> {
-        await prisma.recoveryCode.updateMany({ where: { codeHash }, data: { usedAt: at } });
+      async claimRecoveryCode(codeHash: string, at: Date): Promise<boolean> {
+        const res = await prisma.recoveryCode.updateMany({
+          where: { codeHash, usedAt: null },
+          data: { usedAt: at },
+        });
+        return res.count === 1;
       },
     },
   };

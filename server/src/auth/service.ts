@@ -130,7 +130,9 @@ export function createAuthService(deps: AuthServiceDeps) {
 
       const consumedHash = hashes.find((h) => !result.remaining.includes(h));
       const at = now();
-      if (consumedHash) await deps.recovery.markUsedByHash(consumedHash, at);
+      // Atomic single-use: only the caller that claims the code proceeds.
+      const claimed = consumedHash ? await deps.recovery.claimRecoveryCode(consumedHash, at) : false;
+      if (!claimed) throw invalidMfa();
       await deps.sessions.setMfaVerified(session.id, at);
       return { remaining: result.remaining.length };
     },

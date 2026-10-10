@@ -76,7 +76,9 @@ export interface MfaRepository {
 export interface RecoveryCodeRepository {
   listHashesForUser(userId: string): Promise<string[]>;
   replaceForUser(organizationId: string, userId: string, hashes: string[]): Promise<void>;
-  markUsedByHash(hash: string, at: Date): Promise<void>;
+  // Atomically marks a recovery code used. Returns true only if this call was the
+  // one that consumed it, so single-use holds under concurrent requests.
+  claimRecoveryCode(codeHash: string, at: Date): Promise<boolean>;
 }
 
 export interface AuthRepositories {
